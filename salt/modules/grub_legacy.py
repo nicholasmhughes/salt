@@ -5,7 +5,10 @@ Support for GRUB Legacy
 from __future__ import absolute_import
 
 # Import python libs
+import filecmp
 import os
+import re
+import shutil
 
 # Import salt libs
 import salt.utils
@@ -123,3 +126,60 @@ def _parse_line(line=''):
     key = parts.pop(0)
     value = ' '.join(parts)
     return key, value
+
+
+def cmdline_present(name, value=None, backup=False):
+    '''
+    Add a kernel cmdline parameter to the GRUB conf file
+
+    The first parameter is the kernel cmdline parameter.
+
+    The second parameter is the value for parameters which
+    accept an equal sign (=). This is optional.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' grub.cmdline_present 'quiet'
+
+        salt '*' grub.cmdline_present 'elevator' 'deadline'
+    '''
+    paramstring = str(name)
+    valuestring = str(value)
+    backup_ext = '.bak'
+
+    if value:
+        searchstring = paramstring + '=' + valuestring
+    else:
+        searchstring = paramstring
+
+    grub_conf = _detect_conf()
+    temp_file = grub_conf + '.writing'
+
+    try:
+        with salt.utils.fopen(temp_file, 'w') as _newfile:
+            try:
+                with salt.utils.fopen(grub_conf, 'r') as _oldfile:
+                    for line in _oldfile:
+                        if line.lstrip().startswith('kernel'):
+                            if not searchstring in line:
+                                if paramstring in line:
+                                    line = re.sub(paramstring + '=\S+', searchstring, line)
+                                else:
+                                    line = line.rstrip() + ' ' + searchstring + '\n'
+                        _newfile.write(line)
+            except (IOError, OSError) as exc:
+                msg = "Could not read grub config: {0}"
+                raise CommandExecutionError(msg.format(str(exc)))
+        if not filecmp.cmp(grub_conf, temp_file):
+            if backup:
+                shutil.copy2(grub_conf, grub_conf + backup_ext)
+            shutil.copyfile(temp_file, grub_conf)
+        os.remove(temp_file)
+            
+    except (IOError, OSError) as exc:
+        msg = "Could not write to temporary file: {0}"
+        raise CommandExecutionError(msg.format(str(exc)))
+
+    return conf()
