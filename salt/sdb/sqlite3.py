@@ -156,4 +156,9 @@ def get(key, profile=None):
     res = res.fetchone()
     if not res:
         return None
-    return salt.utils.msgpack.unpackb(res[0])
+    ret = salt.utils.msgpack.unpackb(res[0])
+    try:
+        ret = ret.decode("utf-8")
+    except (UnicodeDecodeError, AttributeError):
+        pass
+    return ret
