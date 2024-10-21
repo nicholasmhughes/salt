@@ -80,6 +80,18 @@ class CMDModuleTest(ModuleCase):
         )
         self.assertEqual(
             self.run_function(
+                "cmd.run", ["cat"], stdin="one\\ntwo", stdin_raw_newlines=False
+            ),
+            "one\ntwo",
+        )
+        self.assertEqual(
+            self.run_function(
+                "cmd.run", ["cat"], stdin="one\\ntwo", stdin_raw_newlines=True
+            ),
+            "one\\ntwo",
+        )
+        self.assertEqual(
+            self.run_function(
                 "cmd.run", ['echo "a=b" | sed -e s/=/:/g'], python_shell=True
             ),
             "a:b",
@@ -596,39 +608,3 @@ class CMDModuleTest(ModuleCase):
         ).splitlines()
         self.assertIn("abc=123", out)
         self.assertIn("ABC=456", out)
-
-    @pytest.mark.slow_test
-    @pytest.mark.skip_unless_on_windows(reason="Minion is not Windows")
-    def test_windows_powershell_script_args(self):
-        """
-        Ensure that powershell processes inline script in args
-        """
-        val = "i like cheese"
-        args = (
-            '-SecureString (ConvertTo-SecureString -String "{}" -AsPlainText -Force)'
-            " -ErrorAction Stop".format(val)
-        )
-        script = "salt://issue-56195/test.ps1"
-        ret = self.run_function(
-            "cmd.script", [script], args=args, shell="powershell", saltenv="base"
-        )
-        self.assertEqual(ret["stdout"], val)
-
-    @pytest.mark.slow_test
-    @pytest.mark.skip_unless_on_windows(reason="Minion is not Windows")
-    @pytest.mark.skip_if_binaries_missing("pwsh")
-    def test_windows_powershell_script_args_pwsh(self):
-        """
-        Ensure that powershell processes inline script in args with powershell
-        core
-        """
-        val = "i like cheese"
-        args = (
-            '-SecureString (ConvertTo-SecureString -String "{}" -AsPlainText -Force)'
-            " -ErrorAction Stop".format(val)
-        )
-        script = "salt://issue-56195/test.ps1"
-        ret = self.run_function(
-            "cmd.script", [script], args=args, shell="pwsh", saltenv="base"
-        )
-        self.assertEqual(ret["stdout"], val)

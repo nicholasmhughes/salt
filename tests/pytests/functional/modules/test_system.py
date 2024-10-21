@@ -1,13 +1,16 @@
 import datetime
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import textwrap
+import time
 
 import pytest
 
 import salt.utils.files
+from salt.exceptions import CommandExecutionError
 
 pytestmark = [
     pytest.mark.skip_unless_on_linux,
@@ -75,7 +78,13 @@ def setup_teardown_vars(file, service, system):
             file.remove("/etc/machine-info")
 
         if _systemd_timesyncd_available_:
-            res = service.start("systemd-timesyncd")
+            try:
+                res = service.start("systemd-timesyncd")
+            except CommandExecutionError:
+                # We possibly did too many restarts in too short time
+                # Wait 10s (default systemd timeout) and try again
+                time.sleep(10)
+                res = service.start("systemd-timesyncd")
             assert res
 
 
@@ -106,6 +115,9 @@ def hwclock_has_compare(cmdmod):
     systems where it's not present so that we can skip the
     comparison portion of the test.
     """
+    hwclock = shutil.which("hwclock")
+    if hwclock is None:
+        pytest.skip("The 'hwclock' binary could not be found")
     res = cmdmod.run_all(cmd="hwclock -h")
     _hwclock_has_compare_ = res["retcode"] == 0 and res["stdout"].find("--compare") > 0
     return _hwclock_has_compare_

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Dict, List
 
 import attr
 import distro
-import packaging
+import packaging.version
 import psutil
 import pytest
 import requests
@@ -22,6 +22,7 @@ from pytestshellutils.utils.processes import (
     ProcessResult,
     _get_cmdline,
     terminate_process,
+    terminate_process_list,
 )
 from pytestskipmarkers.utils import platform
 from saltfactories.bases import SystemdSaltDaemonImpl
@@ -85,7 +86,7 @@ class SaltPkgInstall:
 
     @proc.default
     def _default_proc(self):
-        return Subprocess()
+        return Subprocess(timeout=240)
 
     @distro_id.default
     def _default_distro_id(self):
@@ -105,7 +106,7 @@ class SaltPkgInstall:
 
     @distro_version.default
     def _default_distro_version(self):
-        if self.distro_name == "photon":
+        if self.distro_name in ("photon", "rocky"):
             return distro.version().split(".")[0]
         return distro.version().lower()
 
@@ -219,6 +220,7 @@ class SaltPkgInstall:
             version = self.prev_version
             parsed = packaging.version.parse(version)
             version = f"{parsed.major}.{parsed.minor}"
+        # ensure services stopped on Debian/Ubuntu (minic install for RedHat - non-starting)
         if self.distro_id in ("ubuntu", "debian"):
             self.stop_services()
         return version
@@ -488,9 +490,11 @@ class SaltPkgInstall:
             log.debug("Installing: %s", str(pkg))
             ret = self.proc.run("installer", "-pkg", str(pkg), "-target", "/")
             self._check_retcode(ret)
+
             # Stop the service installed by the installer
             self.proc.run("launchctl", "disable", f"system/{service_name}")
             self.proc.run("launchctl", "bootout", "system", str(plist_file))
+
         elif upgrade:
             env = os.environ.copy()
             extra_args = []
@@ -514,7 +518,6 @@ class SaltPkgInstall:
                 upgrade_cmd,
                 "-y",
                 *args,
-                _timeout=120,
                 env=env,
             )
         else:
@@ -589,23 +592,39 @@ class SaltPkgInstall:
 
     def stop_services(self):
         """
-        Debian distros automatically start the services
-        We want to ensure our tests start with the config
-        settings we have set. This will also verify the expected
-        services are up and running.
+        Debian/Ubuntu distros automatically start the services on install
+        We want to ensure our tests start with the config settings we have set.
+        This will also verify the expected services are up and running.
         """
         retval = True
         for service in ["salt-syndic", "salt-master", "salt-minion"]:
             check_run = self.proc.run("systemctl", "status", service)
             if check_run.returncode != 0:
-                # The system was not started automatically and we
-                # are expecting it to be on install
+                # The system was not started automatically and
+                # we are expecting it to be on install on Debian/Ubuntu systems
                 log.debug("The service %s was not started on install.", service)
                 retval = False
             else:
                 stop_service = self.proc.run("systemctl", "stop", service)
                 self._check_retcode(stop_service)
         return retval
+
+    def restart_services(self):
+        """
+        Debian/Ubuntu distros automatically start the services
+        We want to ensure our tests start with the config settings we have set,
+        for example: after install the services are stopped (similar to RedHat not starting services on install)
+        This will also verify the expected services are up and running.
+        """
+        for service in ["salt-minion", "salt-master", "salt-syndic"]:
+            check_run = self.proc.run("systemctl", "status", service)
+            log.debug(
+                "The restart_services status, before restart, for service %s is %s.",
+                service,
+                check_run,
+            )
+            restart_service = self.proc.run("systemctl", "restart", service)
+            self._check_retcode(restart_service)
 
     def install_previous(self, downgrade=False):
         """
@@ -710,7 +729,6 @@ class SaltPkgInstall:
             gpg_key = gpg_dest
             if relenv:
                 gpg_key = "SALT-PROJECT-GPG-PUBKEY-2023.gpg"
-
             download_file(
                 f"https://repo.saltproject.io/{root_url}{distro_name}/{self.distro_version}/{arch}/{major_ver}/{gpg_key}",
                 f"/etc/apt/keyrings/{gpg_dest}",
@@ -831,14 +849,21 @@ class SaltPkgInstall:
                 self._install_ssm_service()
 
         elif platform.is_darwin():
+            if relenv and platform.is_aarch64():
+                arch = "arm64"
+            elif platform.is_aarch64() and self.classic:
+                arch = "arm64"
+            else:
+                arch = "x86_64"
+
             if self.classic:
-                mac_pkg = f"salt-{self.prev_version}-py3-x86_64.pkg"
+                mac_pkg = f"salt-{self.prev_version}-py3-{arch}.pkg"
                 mac_pkg_url = f"https://repo.saltproject.io/osx/{mac_pkg}"
             else:
                 if not relenv:
-                    mac_pkg = f"salt-{self.prev_version}-1-macos-x86_64.pkg"
+                    mac_pkg = f"salt-{self.prev_version}-1-macos-{arch}.pkg"
                 else:
-                    mac_pkg = f"salt-{self.prev_version}-py3-x86_64.pkg"
+                    mac_pkg = f"salt-{self.prev_version}-py3-{arch}.pkg"
                 mac_pkg_url = (
                     f"https://repo.saltproject.io/salt/py3/macos/{major_ver}/{mac_pkg}"
                 )
@@ -1013,17 +1038,28 @@ class SaltPkgInstall:
     def __enter__(self):
         if platform.is_windows():
             self.update_process_path()
-
-        if not self.no_install:
-            if self.upgrade:
-                self.install_previous()
-            else:
-                self.install()
+        if self.no_install:
+            return self
+        if self.upgrade:
+            self.install_previous()
+        else:
+            self.install()
         return self
 
     def __exit__(self, *_):
         if not self.no_uninstall:
             self.uninstall()
+
+        # Did we left anything running?!
+        procs = []
+        for proc in psutil.process_iter():
+            if "salt" in proc.name():
+                cmdl_strg = " ".join(str(element) for element in _get_cmdline(proc))
+                if "/opt/saltstack" in cmdl_strg:
+                    procs.append(proc)
+
+        if procs:
+            terminate_process_list(procs, kill=True, slow_stop=True)
 
 
 class PkgSystemdSaltDaemonImpl(SystemdSaltDaemonImpl):

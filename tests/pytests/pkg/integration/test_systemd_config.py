@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 pytestmark = [
-    pytest.mark.skip_on_windows(reason="Linux test only"),
+    pytest.mark.skip_unless_on_linux,
 ]
 
 
@@ -21,8 +21,7 @@ def test_system_config(grains):
             "CentOS Stream-8",
             "CentOS Linux-8",
             "CentOS Stream-9",
-            "Fedora Linux-36",
-            "VMware Photon OS-3",
+            "Fedora Linux-40",
             "VMware Photon OS-4",
             "VMware Photon OS-5",
             "Amazon Linux-2023",

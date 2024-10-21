@@ -80,7 +80,7 @@ class SaltVersionsInfo(type):
     SILICON       = SaltVersion("Silicon"      , info=3004,       released=True)
     PHOSPHORUS    = SaltVersion("Phosphorus"   , info=3005,       released=True)
     SULFUR        = SaltVersion("Sulfur"       , info=3006,       released=True)
-    CHLORINE      = SaltVersion("Chlorine"     , info=3007)
+    CHLORINE      = SaltVersion("Chlorine"     , info=3007,       released=True)
     ARGON         = SaltVersion("Argon"        , info=3008)
     POTASSIUM     = SaltVersion("Potassium"    , info=3009)
     CALCIUM       = SaltVersion("Calcium"      , info=3010)
@@ -706,6 +706,7 @@ def dependency_information(include_salt_cloud=False):
         ("msgpack-pure", "msgpack_pure", "version"),
         ("pycrypto", "Crypto", "__version__"),
         ("pycryptodome", "Cryptodome", "version_info"),
+        ("cryptography", "cryptography", "__version__"),
         ("PyYAML", "yaml", "__version__"),
         ("PyZMQ", "zmq", "__version__"),
         ("ZMQ", "zmq", "zmq_version"),

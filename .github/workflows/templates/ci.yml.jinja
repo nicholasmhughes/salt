@@ -39,6 +39,19 @@
 
   <%- endif %>
 
+  <%- set job_name = "nsis-tests" %>
+  <%- if includes.get(job_name, True) %>
+  <{ job_name }>:
+    <%- do conclusion_needs.append(job_name) %>
+    name: NSIS Tests
+    if: ${{ fromJSON(needs.prepare-workflow.outputs.runners)['github-hosted'] }}
+    uses: ./.github/workflows/nsis-tests.yml
+    needs:
+      - prepare-workflow
+    with:
+      changed-files: ${{ needs.prepare-workflow.outputs.changed-files }}
+
+  <%- endif %>
 
   <%- set job_name = "prepare-release" %>
   <%- if includes.get(job_name, True) %>
@@ -311,6 +324,8 @@
     name: Combine Code Coverage
     if: ${{ fromJSON(needs.prepare-workflow.outputs.testrun)['skip_code_coverage'] == false }}
     runs-on: ubuntu-latest
+    env:
+      PIP_INDEX_URL: https://pypi.org/simple
     needs:
       - prepare-workflow
       <%- for need in test_salt_needs.iter(consume=False) %>
@@ -347,14 +362,22 @@
 
 #}
 
-      - name: Get coverage reports
-        id: get-coverage-reports
-        uses: actions/download-artifact@v3
-        # This needs to be actions/download-artifact@v3 because we upload multiple artifacts
-        # under the same name something that actions/upload-artifact@v4 does not do.
+      - name: Merge All Code Coverage Test Run Artifacts
+        continue-on-error: true
+        uses: actions/upload-artifact/merge@v4
         with:
           name: all-testrun-coverage-artifacts
+          pattern: all-testrun-coverage-artifacts-*
+          separate-directories: false
+          delete-merged: true
+
+      - name: Get coverage reports
+        id: get-coverage-reports
+        uses: actions/download-artifact@v4
+        with:
           path: artifacts/coverage/
+          pattern: all-testrun-coverage-artifacts*
+          merge-multiple: true
 
       - name: Display structure of downloaded files
         run: tree -a artifacts/
@@ -407,6 +430,7 @@
           path: artifacts/coverage/html/salt
           retention-days: 7
           if-no-files-found: error
+          include-hidden-files: true
 
       - name: Report Combined Code Coverage
         run: |
@@ -423,6 +447,7 @@
           path: artifacts/coverage/coverage.json
           retention-days: 7
           if-no-files-found: error
+          include-hidden-files: true
 
       - name: Create Combined Code Coverage HTML Report
         run: |
@@ -435,6 +460,7 @@
           path: artifacts/coverage/html/full
           retention-days: 7
           if-no-files-found: error
+          include-hidden-files: true
   <%- endif %>
 
 <%- endblock jobs %>
